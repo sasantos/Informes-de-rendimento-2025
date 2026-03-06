@@ -358,12 +358,19 @@ export default function ExtratoGenerator() {
     total: 0,
   });
   const [showWarning, setShowWarning] = useState(false);
+  const [filterMode, setFilterMode] = useState<"all" | "filter">("all");
+  const [filterIds, setFilterIds] = useState("");
+  const [renderedExtratos, setRenderedExtratos] = useState<Extrato[]>([]);
+  const [generating, setGenerating] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const handleFileUpload = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       setExtratos([]);
+      setRenderedExtratos([]);
+      setFilterMode("all");
+      setFilterIds("");
       setShowWarning(false);
 
       if (!file) {
@@ -497,6 +504,15 @@ export default function ExtratoGenerator() {
 
   const hasExtratos = extratos.length > 0;
 
+  const filteredExtratos = filterMode === "all" || !filterIds.trim()
+    ? extratos
+    : (() => {
+        const ids = filterIds.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+        return extratos.filter((e) =>
+          ids.some((id) => id === String(e.idSap ?? "").trim())
+        );
+      })();
+
   return (
     <>
       <div className="max-w-5xl mx-auto mb-6 bg-white rounded-xl shadow-lg overflow-hidden no-print">
@@ -556,30 +572,131 @@ export default function ExtratoGenerator() {
               />
             </div>
 
-            {/* Step 2 & 3 - Ações */}
-            <div className="flex flex-col sm:flex-row gap-3 pt-2 border-t border-gray-100">
-              <button
-                onClick={handlePrint}
-                disabled={!hasExtratos}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-5 rounded-lg inline-flex items-center justify-center disabled:opacity-40 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all shadow-sm"
-              >
-                <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a2 2 0 002 2h6a2 2 0 002-2v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a2 2 0 00-2-2H7a2 2 0 00-2 2zm8 0H7v3h6V4zm0 8H7v4h6v-4z" clipRule="evenodd" />
-                </svg>
-                <span>Imprimir (1 PDF)</span>
-              </button>
+            {/* Passo 2 - Filtro por ID SAP PJ */}
+            {hasExtratos && (
+              <div className="pt-2 border-t border-gray-100">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="bg-green-600 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">2</span>
+                  <span className="text-sm font-semibold text-gray-700">Selecionar Extratos</span>
+                </div>
+                <div className="flex gap-4 mb-3">
+                  <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                    <input
+                      type="radio"
+                      name="filterMode"
+                      checked={filterMode === "all"}
+                      onChange={() => { setFilterMode("all"); setRenderedExtratos([]); }}
+                      className="accent-green-600"
+                    />
+                    Todos ({extratos.length})
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                    <input
+                      type="radio"
+                      name="filterMode"
+                      checked={filterMode === "filter"}
+                      onChange={() => { setFilterMode("filter"); setRenderedExtratos([]); }}
+                      className="accent-green-600"
+                    />
+                    Filtrar por ID SAP PJ
+                  </label>
+                </div>
+                {filterMode === "filter" && (
+                  <div>
+                    <textarea
+                      value={filterIds}
+                      onChange={(e) => { setFilterIds(e.target.value); setRenderedExtratos([]); }}
+                      placeholder={"Digite os IDs SAP PJ, um por linha ou separados por vírgula:\n12345\n67890\nou: 12345, 67890"}
+                      rows={4}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500 resize-y"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      {filteredExtratos.length} de {extratos.length} extrato(s) selecionado(s)
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
 
-              <button
-                onClick={handleDownloadPDFs}
-                disabled={!hasExtratos}
-                className="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-5 rounded-lg inline-flex items-center justify-center disabled:opacity-40 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all shadow-sm"
-              >
-                <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
-                </svg>
-                <span>Baixar PDFs Individuais</span>
-              </button>
-            </div>
+            {/* Passo 3 - Gerar em Tela */}
+            {hasExtratos && (
+              <div className="pt-2 border-t border-gray-100">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="bg-green-600 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">3</span>
+                  <span className="text-sm font-semibold text-gray-700">Gerar Layouts</span>
+                </div>
+                {renderedExtratos.length > 0 ? (
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 text-sm text-green-700 font-semibold bg-green-50 border border-green-200 rounded-lg px-4 py-2">
+                      <svg className="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                      {renderedExtratos.length} extrato(s) prontos para exportar
+                    </div>
+                    <button
+                      onClick={() => { setRenderedExtratos([]); setGenerating(false); }}
+                      className="text-xs text-gray-400 hover:text-gray-600 underline"
+                    >
+                      Limpar
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={async () => {
+                      setGenerating(true);
+                      await new Promise((r) => setTimeout(r, 50));
+                      setRenderedExtratos(filteredExtratos);
+                      setTimeout(() => setGenerating(false), 100);
+                    }}
+                    disabled={filteredExtratos.length === 0 || generating}
+                    className="bg-gray-700 hover:bg-gray-800 text-white font-semibold py-2.5 px-6 rounded-lg text-sm inline-flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-sm"
+                  >
+                    {generating ? (
+                      <>
+                        <svg className="animate-spin w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Gerando layouts...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                          <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                          <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
+                        </svg>
+                        Gerar {filteredExtratos.length} extrato(s) em tela
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Passo 4 - Ações */}
+            {renderedExtratos.length > 0 && (
+              <div className="flex flex-col sm:flex-row gap-3 pt-2 border-t border-gray-100">
+                <button
+                  onClick={handlePrint}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-5 rounded-lg inline-flex items-center justify-center transition-all shadow-sm"
+                >
+                  <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a2 2 0 002 2h6a2 2 0 002-2v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a2 2 0 00-2-2H7a2 2 0 00-2 2zm8 0H7v3h6V4zm0 8H7v4h6v-4z" clipRule="evenodd" />
+                  </svg>
+                  <span>Imprimir ({renderedExtratos.length})</span>
+                </button>
+
+                <button
+                  onClick={handleDownloadPDFs}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-5 rounded-lg inline-flex items-center justify-center transition-all shadow-sm"
+                >
+                  <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+                  </svg>
+                  <span>Baixar PDFs Individuais</span>
+                </button>
+              </div>
+            )}
           </div>
 
         {showWarning && (
@@ -605,12 +722,14 @@ export default function ExtratoGenerator() {
       </div>
 
       <div ref={containerRef} className="w-full overflow-x-auto pb-10">
-        {extratos.length === 0 ? (
+        {renderedExtratos.length === 0 ? (
           <div className="max-w-4xl mx-auto bg-white p-12 shadow-md rounded border border-gray-200 text-center text-gray-500 no-print">
-            Nenhum dado carregado. Faça o upload do arquivo acima.
+            {extratos.length === 0
+              ? "Nenhum dado carregado. Faça o upload do arquivo acima."
+              : "Selecione os extratos e clique em \"Gerar em tela\" para visualizar."}
           </div>
         ) : (
-          extratos.map((ext, i) => <ExtratoDocument key={i} extrato={ext} />)
+          renderedExtratos.map((ext, i) => <ExtratoDocument key={i} extrato={ext} />)
         )}
       </div>
     </>
