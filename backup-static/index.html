@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Extrato de Pagamentos em Lote</title>
+    <script src="libs/tailwindcss.js"></script>
+    <script src="libs/xlsx.full.min.js"></script>
+    <script src="libs/html2pdf.bundle.min.js"></script>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="bg-gray-200 font-sans text-gray-800 p-4 sm:p-8">
+    <!-- Controles -->
+    <div
+      class="max-w-5xl mx-auto mb-6 bg-white p-8 rounded-lg shadow-lg no-print"
+    >
+      <h2 class="text-2xl font-extrabold mb-2 text-gray-800 border-b pb-2">
+        Gerador em Lote: Extratos de Pagamentos
+      </h2>
+      <p class="text-sm text-gray-600 mb-6">
+        Faça o upload da planilha contendo os informes. O sistema gerará as
+        páginas perfeitamente enquadradas no formato A4.
+      </p>
+
+      <div class="flex flex-col md:flex-row justify-between items-end gap-6">
+        <div class="w-full md:w-1/2">
+          <label
+            for="uploadExcel"
+            class="block text-sm font-semibold text-gray-700 mb-2"
+            >1. Selecione a Planilha (.xlsx, .csv)</label
+          >
+          <input
+            type="file"
+            id="uploadExcel"
+            accept=".xlsx, .xlsm, .xls, .csv"
+            class="block w-full text-sm text-gray-700 file:mr-4 file:py-2.5 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100 cursor-pointer border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors"
+          />
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+          <button
+            onclick="window.print()"
+            id="btnPrint"
+            class="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-5 rounded-md inline-flex items-center justify-center disabled:opacity-50 disabled:bg-gray-400 disabled:cursor-not-allowed transition-all shadow-sm"
+            disabled
+          >
+            <svg
+              class="fill-current w-4 h-4 mr-2"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+            >
+              <path d="M13 8V2H7v6H2l8 8 8-8h-5zM0 18h20v2H0v-2z" />
+            </svg>
+            <span>2. Imprimir (1 PDF)</span>
+          </button>
+
+          <button
+            onclick="downloadIndividualPDFs()"
+            id="btnDownloadInd"
+            class="w-full md:w-auto bg-green-600 hover:bg-green-700 text-white font-semibold py-2.5 px-5 rounded-md inline-flex items-center justify-center disabled:opacity-50 disabled:bg-gray-400 disabled:cursor-not-allowed transition-all shadow-sm"
+            disabled
+          >
+            <svg
+              class="fill-current w-4 h-4 mr-2"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z"
+                clip-rule="evenodd"
+              />
+            </svg>
+            <span>3. Baixar PDFs</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Alerta de Múltiplos Downloads -->
+      <div
+        id="downloadWarning"
+        class="hidden mt-6 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-md"
+      >
+        <div class="flex items-start">
+          <div class="flex-shrink-0">
+            <svg
+              class="h-5 w-5 text-yellow-500"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </div>
+          <div class="ml-3">
+            <p class="text-sm text-yellow-700 font-semibold">
+              Atenção: O sistema iniciará a transferência de vários arquivos em
+              sequência.
+            </p>
+            <p class="text-sm text-yellow-600 mt-1">
+              Se o seu navegador exibir um aviso bloqueando o download de
+              <strong>múltiplos arquivos</strong>, clique em
+              <strong>Permitir</strong>.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Painel de Status Aprimorado -->
+      <div
+        id="statusPanel"
+        class="hidden mt-6 p-4 rounded-md border transition-all duration-300"
+      >
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center">
+            <svg
+              id="statusIconSpinner"
+              class="animate-spin -ml-1 mr-3 h-5 w-5 hidden"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                class="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                stroke-width="4"
+              ></circle>
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
+            </svg>
+            <svg
+              id="statusIconAlert"
+              class="mr-2 h-5 w-5 hidden"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                clip-rule="evenodd"
+              />
+            </svg>
+            <svg
+              id="statusIconSuccess"
+              class="mr-2 h-5 w-5 hidden"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                clip-rule="evenodd"
+              />
+            </svg>
+            <span id="statusText" class="text-sm font-semibold"
+              >Processando...</span
+            >
+          </div>
+          <span id="statusCount" class="text-sm font-bold"></span>
+        </div>
+        <div
+          id="progressWrapper"
+          class="w-full bg-gray-200 rounded-full h-2.5 hidden mt-2"
+        >
+          <div
+            id="progressBar"
+            class="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+            style="width: 0%"
+          ></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Container do Documento (overflow para podermos ver as folhas A4 ao centro no PC) -->
+    <div id="documentos-container" class="w-full overflow-x-auto pb-10">
+      <div
+        class="max-w-4xl mx-auto bg-white p-12 shadow-md rounded border border-gray-200 text-center text-gray-500 no-print"
+      >
+        Nenhum dado carregado. Faça o upload do arquivo acima.
+      </div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>

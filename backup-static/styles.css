@@ -1,0 +1,52 @@
+/* Bloqueia o tamanho EXATO de uma folha A4 (96 DPI). Altura ajustada para 1122px */
+.a4-page {
+  width: 794px !important;
+  height: 1122px !important;
+  padding: 40px;
+  margin: 0 auto 20px auto;
+  background: white;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Instrução direta para a biblioteca html2pdf fazer a quebra limpa */
+.html2pdf__page-break {
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  page-break-after: always;
+}
+
+/* Quando estiver a gerar o PDF, removemos QUALQUER margem e sobra que possa criar folha em branco */
+.exporting .a4-page {
+  margin: 0 auto !important;
+  box-shadow: none !important;
+  border: none !important;
+  border-radius: 0 !important;
+  height: auto !important;
+}
+
+/* Remove o espaçamento inferior do container principal durante a exportação */
+.exporting .extrato-document {
+  margin: 0 auto !important;
+  padding: 0 !important;
+  border: none !important;
+}
+
+@media print {
+  body {
+    background-color: white;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .a4-page {
+    margin: 0 !important;
+    box-shadow: none !important;
+    page-break-after: always;
+  }
+}
