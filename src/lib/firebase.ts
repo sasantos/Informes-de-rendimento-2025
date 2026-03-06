@@ -1,5 +1,6 @@
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -10,5 +11,12 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+const app = getApps().find((a) => a.name === "[DEFAULT]") ?? initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+export const db = getFirestore(app);
+
+// App secundário para criar usuários sem derrubar a sessão do admin
+const secondaryApp =
+  getApps().find((a) => a.name === "secondary") ??
+  initializeApp(firebaseConfig, "secondary");
+export const secondaryAuth = getAuth(secondaryApp);

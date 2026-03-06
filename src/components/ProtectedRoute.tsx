@@ -5,14 +5,20 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && !user) {
+    if (loading) return;
+    if (!user) {
+      router.push("/login");
+      return;
+    }
+    // Usuário existe no Auth mas não tem perfil no Firestore ou está desativado
+    if (!profile || profile.active === false) {
       router.push("/login");
     }
-  }, [user, loading, router]);
+  }, [user, profile, loading, router]);
 
   if (loading) {
     return (
@@ -25,7 +31,7 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
     );
   }
 
-  if (!user) return null;
+  if (!user || !profile || profile.active === false) return null;
 
   return <>{children}</>;
 }

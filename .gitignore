@@ -38,3 +38,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+Informes_pdf/
+Informe_excel v2.xlsm
+Informes Conferidos.xlsx
+Informes de rendimento 2025.rar
