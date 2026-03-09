@@ -63,6 +63,31 @@ export interface PageData {
   isLast: boolean;
 }
 
+function createEmptyExtrato(previous?: Extrato | null): Extrato {
+  return {
+    dataInicio: previous?.dataInicio,
+    dataFim: previous?.dataFim,
+    dataGeracao: previous?.dataGeracao,
+    ano: previous?.ano,
+    adiantamentos: [],
+    faturamentos: [],
+    recebedores: [],
+    contratos: [],
+  };
+}
+
+function hasExtratoContent(rel: Extrato): boolean {
+  return Boolean(
+    rel.empresa ||
+      rel.idSap ||
+      rel.produtor ||
+      rel.contratos.length > 0 ||
+      rel.adiantamentos.length > 0 ||
+      rel.faturamentos.length > 0 ||
+      rel.recebedores.length > 0,
+  );
+}
+
 export function formatExcelDate(val: string | number | undefined | null, isDateTime = false): string {
   if (!val) return "";
   const num = Number(val);
@@ -122,10 +147,17 @@ export function parseExtratos(rows: (string | number)[][]): Extrato[] {
     const rowStr = cells.join(" ");
 
     if (rowStr.includes("Extrato de Pagamentos")) {
-      if (rel) extratos.push(rel);
-      rel = { adiantamentos: [], faturamentos: [], recebedores: [], contratos: [] };
+      if (rel && hasExtratoContent(rel)) {
+        extratos.push(rel);
+      }
+      rel = createEmptyExtrato(rel);
       mode = "";
       continue;
+    }
+
+    if (!rel && rowStr.includes("Empresa Pagadora:")) {
+      rel = createEmptyExtrato();
+      mode = "";
     }
 
     if (!rel) continue;
@@ -135,6 +167,13 @@ export function parseExtratos(rows: (string | number)[][]): Extrato[] {
       rel.dataFim = formatExcelDate(cells[cells.indexOf("a") + 1]);
       rel.dataGeracao = formatExcelDate(cells[cells.length - 1], true);
     } else if (rowStr.includes("Empresa Pagadora:")) {
+      if (hasExtratoContent(rel)) {
+        const previous = rel;
+        extratos.push(previous);
+        rel = createEmptyExtrato(previous);
+        mode = "";
+      }
+
       const idx1 = cells.indexOf("Empresa Pagadora:");
       const idx2 = cells.indexOf("CNPJ/MF Pagadora:");
       if (idx1 !== -1 && idx2 !== -1) {
@@ -145,7 +184,14 @@ export function parseExtratos(rows: (string | number)[][]): Extrato[] {
       const idx1 = cells.indexOf("Ano-base:");
       const idx2 = cells.findIndex((c) => c.includes("ID SAP PJ") || c.includes("ID SAR PJ"));
       if (idx1 !== -1) rel.ano = cells[idx1 + 1];
-      if (idx2 !== -1) rel.idSap = cells.slice(idx2 + 1).join(" ").replace(/^,+|,+$/g, "");
+      if (idx2 !== -1) {
+        rel.idSap = cells.slice(idx2 + 1).join(" ").replace(/^,+|,+$/g, "");
+      } else {
+        const idMatch = rowStr.match(/ID\s+SA(?:P|R)\s+PJ[:\s-]*([A-Z]?\s*\d[\d\s-]*)/i);
+        if (idMatch?.[1]) {
+          rel.idSap = idMatch[1].replace(/\s+/g, "").replace(/^,+|,+$/g, "");
+        }
+      }
     } else if (rowStr.includes("Produtor Rural Títular:") || rowStr.includes("Produtor Rural Titular:")) {
       const idx1 = cells.findIndex((c) => c.includes("Produtor Rural"));
       const idx2 = cells.findIndex((c) => c.includes("CNPJ/MF Produtor") || c.includes("CPF/MF Produtor"));
@@ -162,7 +208,10 @@ export function parseExtratos(rows: (string | number)[][]): Extrato[] {
     } else if (cells[0] === "Recebedores") {
       mode = "recebedores";
     } else if (mode === "contratos") {
-      if (cells[0] && cells[0].startsWith("PARC-")) rel.contratos.push(cells[0]);
+      const contratoLinha = cells.join(" ").trim();
+      if (/^(PARC|ARRE)\b/i.test(contratoLinha)) {
+        rel.contratos.push(contratoLinha);
+      }
     } else if (mode === "adiantamentos") {
       if (cells.includes("Total:")) {
         rel.adiantamentosTotal = { tons: cells[cells.length - 2], total: cells[cells.length - 1] };
@@ -199,7 +248,7 @@ export function parseExtratos(rows: (string | number)[][]): Extrato[] {
       }
     }
   }
-  if (rel) extratos.push(rel);
+  if (rel && hasExtratoContent(rel)) extratos.push(rel);
   return extratos;
 }
 

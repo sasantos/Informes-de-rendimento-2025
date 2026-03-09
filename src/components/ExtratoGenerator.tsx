@@ -30,7 +30,26 @@ interface ExtratoGeneratorProps {
 }
 
 const PREVIEW_PAGE_SIZE = 10;
-const APP_VERSION = "1.0.1";
+const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION?.trim() || "1.0.1";
+
+function normalizeSapId(value: string | undefined): string {
+  return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function stripOptionalPrefixP(value: string): string {
+  if (value.startsWith("P") && /^\d+$/.test(value.slice(1))) {
+    return value.slice(1);
+  }
+  return value;
+}
+
+function sapIdMatches(input: string, source: string): boolean {
+  const a = normalizeSapId(input);
+  const b = normalizeSapId(source);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return stripOptionalPrefixP(a) === stripOptionalPrefixP(b);
+}
 
 function waitForNextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
@@ -89,9 +108,25 @@ function sanitizeFilePart(value: string | undefined, fallback: string): string {
   return sanitized || fallback;
 }
 
+function normalizeContratoForFilename(contrato: string | undefined): string {
+  const raw = String(contrato || "").trim();
+  if (!raw) return "SEM_CONTRATO";
+
+  const upper = raw.toUpperCase();
+  if (upper.startsWith("ARRE") || upper.startsWith("PARC")) {
+    const prefix = upper.startsWith("ARRE") ? "ARRE" : "PARC";
+    const digits = raw.match(/\d+/g)?.join("") || "";
+    if (digits) return `${prefix}${digits}`;
+  }
+
+  const safe = sanitizeFilePart(raw, "SEM_CONTRATO");
+  if (safe === "-" || safe === "_") return "SEM_CONTRATO";
+  return safe;
+}
+
 function getExtratoFilename(extrato: Extrato): string {
   const safeContratos = (extrato.contratos.length > 0 ? extrato.contratos : ["SEM_CONTRATO"])
-    .map((contrato) => sanitizeFilePart(contrato, "SEM_CONTRATO"))
+    .map((contrato) => normalizeContratoForFilename(contrato))
     .join("-");
   const safeIdSap = sanitizeFilePart(extrato.idSap, "SEM_ID_SAP_PJ");
   const safeProdutor = sanitizeFilePart(extrato.produtor, "SEM_PRODUTOR_RURAL_TITULAR");
@@ -677,9 +712,12 @@ export default function ExtratoGenerator({
   const filteredExtratos = filterMode === "all" || !filterIds.trim()
     ? extratos
     : (() => {
-        const ids = filterIds.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+        const ids = filterIds
+          .split(/[\n,]+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
         return extratos.filter((e) =>
-          ids.some((id) => id === String(e.idSap ?? "").trim())
+          ids.some((id) => sapIdMatches(id, String(e.idSap ?? "")))
         );
       })();
 
