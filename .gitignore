@@ -44,3 +44,5 @@ Informe_excel v2.xlsm
 Informes Conferidos.xlsx
 Informes de rendimento 2025.rar
 .env.local
+
+/src/generated/prisma

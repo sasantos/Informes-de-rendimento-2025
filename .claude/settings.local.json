@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(grep -E \"^html2canvas$|^jspdf$\")"
+      "Bash(grep -E \"^html2canvas$|^jspdf$\")",
+      "Bash(npm install prisma @prisma/client)",
+      "Bash(npx prisma init --datasource-provider postgresql)",
+      "Bash(npx prisma migrate dev --name init_extrato_logs)",
+      "Bash(npx prisma generate)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script)",
+      "Bash(npx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script)",
+      "Bash(npx prisma db push)",
+      "Bash(npm install @prisma/adapter-pg pg @types/pg)"
     ]
   }
 }

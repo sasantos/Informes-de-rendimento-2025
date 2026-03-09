@@ -4,12 +4,15 @@ import { useState } from "react";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import ExtratoGenerator from "@/components/ExtratoGenerator";
 import AdminPanel from "@/components/AdminPanel";
+import ExtratoLogsDashboard from "@/components/ExtratoLogsDashboard";
 import { useAuth } from "@/contexts/AuthContext";
+
+type MainTab = "extrato" | "admin" | "logs";
 
 function HomeContent() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin";
-  const [activeTab, setActiveTab] = useState<"extrato" | "admin">("extrato");
+  const [activeTab, setActiveTab] = useState<MainTab>("extrato");
 
   if (!isAdmin) {
     return (
@@ -19,17 +22,25 @@ function HomeContent() {
     );
   }
 
-  return (
-    <div className={activeTab === "extrato" ? "px-4 sm:px-8 pb-4 sm:pb-8" : "p-4 sm:p-8"}>
-      {activeTab === "extrato" ? (
-        <ExtratoGenerator
-          showAdminTabSwitch
-          activeTab={activeTab}
-          onActiveTabChange={setActiveTab}
-        />
-      ) : (
+  if (activeTab === "admin") {
+    return (
+      <div className="p-4 sm:p-8">
         <AdminPanel onBackToExtrato={() => setActiveTab("extrato")} />
-      )}
+      </div>
+    );
+  }
+
+  if (activeTab === "logs") {
+    return <ExtratoLogsDashboard onBack={() => setActiveTab("extrato")} />;
+  }
+
+  return (
+    <div className="px-4 sm:px-8 pb-4 sm:pb-8">
+      <ExtratoGenerator
+        showAdminTabSwitch
+        activeTab={activeTab}
+        onActiveTabChange={(tab) => setActiveTab(tab as MainTab)}
+      />
     </div>
   );
 }

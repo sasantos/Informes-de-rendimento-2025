@@ -14,7 +14,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 
 type StatusState = "idle" | "loading" | "progress" | "error" | "success";
-type MainTab = "extrato" | "admin";
+type MainTab = "extrato" | "admin" | "logs";
 
 interface Status {
   state: StatusState;
@@ -600,6 +600,33 @@ export default function ExtratoGenerator({
     [],
   );
 
+  const logExtratos = useCallback(
+    async (extratosList: Extrato[]) => {
+      try {
+        const idToken = await user?.getIdToken();
+        if (!idToken || extratosList.length === 0) return;
+        await fetch("/api/logs/extrato", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify(
+            extratosList.map((e) => ({
+              codeSap: e.idSap ?? "",
+              cnpj: e.produtorCnpj ?? "",
+              produtor: e.produtor ?? "",
+              dataGeracao: e.dataGeracao ?? "",
+            })),
+          ),
+        });
+      } catch {
+        // log silencioso — não bloqueia o fluxo
+      }
+    },
+    [user],
+  );
+
   const handleDownloadPDFs = useCallback(async () => {
     if (renderedExtratos.length === 0) return;
 
@@ -615,6 +642,7 @@ export default function ExtratoGenerator({
       const SCALE = 1.5;
       const CONCURRENCY = 1;
       let completed = 0;
+      const gerados: Extrato[] = [];
 
       setStatus({
         state: "progress",
@@ -665,6 +693,7 @@ export default function ExtratoGenerator({
           }
 
           pdf.save(`${getExtratoFilename(extrato)}.pdf`);
+          gerados.push(extrato);
         } finally {
           root.unmount();
           mountNode.remove();
@@ -684,6 +713,9 @@ export default function ExtratoGenerator({
       await Promise.all(batch.map(processExtrato));
       await new Promise((r) => setTimeout(r, 0));
     }
+
+      // Uma única chamada ao final com todos os PDFs gerados com sucesso
+      await logExtratos(gerados);
 
       setStatus({
         state: "success",
@@ -705,7 +737,7 @@ export default function ExtratoGenerator({
       document.body.classList.remove("exporting");
       setTimeout(() => setShowWarning(false), 5000);
     }
-  }, [renderedExtratos, showCompletionToast]);
+  }, [renderedExtratos, showCompletionToast, logExtratos]);
 
   const hasExtratos = extratos.length > 0;
 
@@ -790,6 +822,16 @@ export default function ExtratoGenerator({
                   }`}
                 >
                   Painel
+                </button>
+                <button
+                  onClick={() => onActiveTabChange("logs")}
+                  className={`px-3 py-1.5 text-xs sm:text-sm font-semibold rounded-md transition-colors ${
+                    activeTab === "logs"
+                      ? "bg-white text-gray-800"
+                      : "text-white hover:bg-white/10"
+                  }`}
+                >
+                  Histórico
                 </button>
               </div>
             )}
