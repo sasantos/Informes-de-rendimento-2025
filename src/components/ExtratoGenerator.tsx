@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useCallback } from "react";
 import * as XLSX from "xlsx";
 import {
   Extrato,
@@ -20,6 +20,46 @@ interface Status {
   message: string;
   current: number;
   total: number;
+}
+
+const PREVIEW_PAGE_SIZE = 10;
+
+function waitForNextFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+async function waitForImages(container: HTMLElement): Promise<void> {
+  const images = Array.from(container.querySelectorAll("img"));
+  await Promise.all(
+    images.map(
+      (img) =>
+        new Promise<void>((resolve) => {
+          if (img.complete) {
+            resolve();
+            return;
+          }
+
+          const timeoutId = window.setTimeout(() => resolve(), 2000);
+          const done = () => {
+            window.clearTimeout(timeoutId);
+            resolve();
+          };
+
+          img.addEventListener("load", done, { once: true });
+          img.addEventListener("error", done, { once: true });
+        }),
+    ),
+  );
+}
+
+function sanitizeFilePart(value: string | undefined, fallback: string): string {
+  return String(value || fallback).replace(/[\\/:*?"<>|]/g, "").trim();
+}
+
+function getExtratoFilename(extrato: Extrato): string {
+  const safeId = sanitizeFilePart(extrato.idSap, "SEM_ID");
+  const safeProdutor = sanitizeFilePart(extrato.produtor, "SEM_NOME");
+  return `${safeId}_${safeProdutor}`;
 }
 
 function ExtratoTable({
@@ -262,13 +302,7 @@ function ExtratoPage({
 }
 
 function ExtratoDocument({ extrato }: { extrato: Extrato }) {
-  const safeId = String(extrato.idSap || "SEM_ID")
-    .replace(/[\\/:*?"<>|]/g, "")
-    .trim();
-  const safeProdutor = String(extrato.produtor || "SEM_NOME")
-    .replace(/[\\/:*?"<>|]/g, "")
-    .trim();
-  const filename = `${safeId}_${safeProdutor}`;
+  const filename = getExtratoFilename(extrato);
   const pages = paginateExtrato(extrato);
 
   return (
@@ -362,13 +396,14 @@ export default function ExtratoGenerator() {
   const [filterIds, setFilterIds] = useState("");
   const [renderedExtratos, setRenderedExtratos] = useState<Extrato[]>([]);
   const [generating, setGenerating] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [previewPage, setPreviewPage] = useState(1);
 
   const handleFileUpload = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       setExtratos([]);
       setRenderedExtratos([]);
+      setPreviewPage(1);
       setFilterMode("all");
       setFilterIds("");
       setShowWarning(false);
@@ -443,64 +478,108 @@ export default function ExtratoGenerator() {
   }, []);
 
   const handleDownloadPDFs = useCallback(async () => {
-    if (!containerRef.current) return;
-    const cards = Array.from(containerRef.current.querySelectorAll(".extrato-document")) as HTMLElement[];
-    if (cards.length === 0) return;
+    if (renderedExtratos.length === 0) return;
 
     setShowWarning(true);
     document.body.classList.add("exporting");
+    try {
 
     const html2canvas = (await import("html2canvas")).default;
     const { jsPDF } = await import("jspdf");
+    const { createRoot } = await import("react-dom/client");
 
-    const SCALE = 1.5;
-    const CONCURRENCY = 3;
-    let completed = 0;
+      const SCALE = 1.5;
+      const CONCURRENCY = 1;
+      let completed = 0;
 
-    const processCard = async (card: HTMLElement) => {
-      const filename = card.getAttribute("data-filename") + ".pdf";
-      const a4Pages = Array.from(card.querySelectorAll(".a4-page")) as HTMLElement[];
-      const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+      setStatus({
+        state: "progress",
+        message: "Preparando exportacao dos PDFs...",
+        current: 0,
+        total: renderedExtratos.length,
+      });
 
-      for (let i = 0; i < a4Pages.length; i++) {
-        const page = a4Pages[i];
-        const canvas = await html2canvas(page, {
-          scale: SCALE,
-          useCORS: true,
-          logging: false,
-          width: page.offsetWidth,
-          height: page.offsetHeight,
-          windowWidth: page.offsetWidth,
-        });
-        const imgData = canvas.toDataURL("image/jpeg", 0.95);
-        if (i > 0) pdf.addPage();
-        pdf.addImage(imgData, "JPEG", 0, 0, 210, 297);
+    const processExtrato = async (extrato: Extrato) => {
+      const mountNode = document.createElement("div");
+      mountNode.style.position = "fixed";
+      mountNode.style.left = "-100000px";
+      mountNode.style.top = "0";
+      mountNode.style.width = "794px";
+      mountNode.style.opacity = "0";
+      mountNode.style.pointerEvents = "none";
+      mountNode.style.zIndex = "-1";
+      document.body.appendChild(mountNode);
+
+      const root = createRoot(mountNode);
+      try {
+        root.render(<ExtratoDocument extrato={extrato} />);
+        await waitForNextFrame();
+        await waitForNextFrame();
+        await waitForImages(mountNode);
+
+        const a4Pages = Array.from(
+          mountNode.querySelectorAll(".a4-page"),
+        ) as HTMLElement[];
+
+        if (a4Pages.length === 0) {
+          throw new Error("Nao foi possivel preparar o layout para exportacao.");
+        }
+
+        const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+        for (let i = 0; i < a4Pages.length; i++) {
+          const page = a4Pages[i];
+          const canvas = await html2canvas(page, {
+            scale: SCALE,
+            useCORS: true,
+            logging: false,
+            width: page.offsetWidth,
+            height: page.offsetHeight,
+            windowWidth: page.offsetWidth,
+          });
+          const imgData = canvas.toDataURL("image/jpeg", 0.95);
+          if (i > 0) pdf.addPage();
+          pdf.addImage(imgData, "JPEG", 0, 0, 210, 297);
+        }
+
+        pdf.save(`${getExtratoFilename(extrato)}.pdf`);
+      } finally {
+        root.unmount();
+        mountNode.remove();
       }
 
-      pdf.save(filename);
       completed++;
       setStatus({
         state: "progress",
-        message: `Transferindo PDFs... (${completed}/${cards.length})`,
+        message: `Transferindo PDFs... (${completed}/${renderedExtratos.length})`,
         current: completed,
-        total: cards.length,
+        total: renderedExtratos.length,
       });
     };
 
-    for (let i = 0; i < cards.length; i += CONCURRENCY) {
-      const batch = cards.slice(i, i + CONCURRENCY);
-      await Promise.all(batch.map(processCard));
+    for (let i = 0; i < renderedExtratos.length; i += CONCURRENCY) {
+      const batch = renderedExtratos.slice(i, i + CONCURRENCY);
+      await Promise.all(batch.map(processExtrato));
+      await new Promise((r) => setTimeout(r, 0));
     }
 
-    document.body.classList.remove("exporting");
-    setStatus({
-      state: "success",
-      message: `Transferência concluída! ${cards.length} PDFs baixados.`,
-      current: cards.length,
-      total: cards.length,
-    });
-    setTimeout(() => setShowWarning(false), 5000);
-  }, []);
+      setStatus({
+        state: "success",
+        message: `Transferencia concluida! ${renderedExtratos.length} PDFs baixados.`,
+        current: renderedExtratos.length,
+        total: renderedExtratos.length,
+      });
+    } catch (error) {
+      setStatus({
+        state: "error",
+        message: `Erro na geracao dos PDFs: ${(error as Error).message}`,
+        current: 0,
+        total: 0,
+      });
+    } finally {
+      document.body.classList.remove("exporting");
+      setTimeout(() => setShowWarning(false), 5000);
+    }
+  }, [renderedExtratos]);
 
   const hasExtratos = extratos.length > 0;
 
@@ -512,6 +591,21 @@ export default function ExtratoGenerator() {
           ids.some((id) => id === String(e.idSap ?? "").trim())
         );
       })();
+
+  const totalPreviewPages = Math.max(
+    1,
+    Math.ceil(renderedExtratos.length / PREVIEW_PAGE_SIZE),
+  );
+  const currentPreviewPage = Math.min(previewPage, totalPreviewPages);
+  const previewStartIndex = (currentPreviewPage - 1) * PREVIEW_PAGE_SIZE;
+  const previewEndIndex = Math.min(
+    previewStartIndex + PREVIEW_PAGE_SIZE,
+    renderedExtratos.length,
+  );
+  const visibleExtratos = renderedExtratos.slice(
+    previewStartIndex,
+    previewEndIndex,
+  );
 
   return (
     <>
@@ -585,7 +679,7 @@ export default function ExtratoGenerator() {
                       type="radio"
                       name="filterMode"
                       checked={filterMode === "all"}
-                      onChange={() => { setFilterMode("all"); setRenderedExtratos([]); }}
+                      onChange={() => { setFilterMode("all"); setRenderedExtratos([]); setPreviewPage(1); }}
                       className="accent-green-600"
                     />
                     Todos ({extratos.length})
@@ -595,7 +689,7 @@ export default function ExtratoGenerator() {
                       type="radio"
                       name="filterMode"
                       checked={filterMode === "filter"}
-                      onChange={() => { setFilterMode("filter"); setRenderedExtratos([]); }}
+                      onChange={() => { setFilterMode("filter"); setRenderedExtratos([]); setPreviewPage(1); }}
                       className="accent-green-600"
                     />
                     Filtrar por ID SAP PJ
@@ -605,7 +699,7 @@ export default function ExtratoGenerator() {
                   <div>
                     <textarea
                       value={filterIds}
-                      onChange={(e) => { setFilterIds(e.target.value); setRenderedExtratos([]); }}
+                      onChange={(e) => { setFilterIds(e.target.value); setRenderedExtratos([]); setPreviewPage(1); }}
                       placeholder={"Digite os IDs SAP PJ, um por linha ou separados por vírgula:\n12345\n67890\nou: 12345, 67890"}
                       rows={4}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500 resize-y"
@@ -631,10 +725,10 @@ export default function ExtratoGenerator() {
                       <svg className="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
                         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                       </svg>
-                      {renderedExtratos.length} extrato(s) prontos para exportar
+                      {renderedExtratos.length} extrato(s) prontos. Mostrando {previewStartIndex + 1}-{previewEndIndex} em tela.
                     </div>
                     <button
-                      onClick={() => { setRenderedExtratos([]); setGenerating(false); }}
+                      onClick={() => { setRenderedExtratos([]); setGenerating(false); setPreviewPage(1); }}
                       className="text-xs text-gray-400 hover:text-gray-600 underline"
                     >
                       Limpar
@@ -645,6 +739,7 @@ export default function ExtratoGenerator() {
                     onClick={async () => {
                       setGenerating(true);
                       await new Promise((r) => setTimeout(r, 50));
+                      setPreviewPage(1);
                       setRenderedExtratos(filteredExtratos);
                       setTimeout(() => setGenerating(false), 100);
                     }}
@@ -683,7 +778,7 @@ export default function ExtratoGenerator() {
                   <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a2 2 0 002 2h6a2 2 0 002-2v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a2 2 0 00-2-2H7a2 2 0 00-2 2zm8 0H7v3h6V4zm0 8H7v4h6v-4z" clipRule="evenodd" />
                   </svg>
-                  <span>Imprimir ({renderedExtratos.length})</span>
+                  <span>Imprimir em Tela ({visibleExtratos.length})</span>
                 </button>
 
                 <button
@@ -693,7 +788,7 @@ export default function ExtratoGenerator() {
                   <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
                   </svg>
-                  <span>Baixar PDFs Individuais</span>
+                  <span>Baixar PDFs Individuais ({renderedExtratos.length})</span>
                 </button>
               </div>
             )}
@@ -721,7 +816,34 @@ export default function ExtratoGenerator() {
         </div>
       </div>
 
-      <div ref={containerRef} className="w-full overflow-x-auto pb-10">
+      {renderedExtratos.length > PREVIEW_PAGE_SIZE && (
+        <div className="max-w-5xl mx-auto mb-4 bg-white border border-gray-200 rounded-lg px-4 py-3 no-print flex items-center justify-between">
+          <p className="text-sm text-gray-600">
+            Mostrando {previewStartIndex + 1}-{previewEndIndex} de {renderedExtratos.length} extratos.
+          </p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
+              disabled={currentPreviewPage <= 1}
+              className="text-sm px-3 py-1.5 rounded border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Anterior
+            </button>
+            <span className="text-sm text-gray-700">
+              Pagina {currentPreviewPage} de {totalPreviewPages}
+            </span>
+            <button
+              onClick={() => setPreviewPage((p) => Math.min(totalPreviewPages, p + 1))}
+              disabled={currentPreviewPage >= totalPreviewPages}
+              className="text-sm px-3 py-1.5 rounded border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Proxima
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="w-full overflow-x-auto pb-10">
         {renderedExtratos.length === 0 ? (
           <div className="max-w-4xl mx-auto bg-white p-12 shadow-md rounded border border-gray-200 text-center text-gray-500 no-print">
             {extratos.length === 0
@@ -729,7 +851,9 @@ export default function ExtratoGenerator() {
               : "Selecione os extratos e clique em \"Gerar em tela\" para visualizar."}
           </div>
         ) : (
-          renderedExtratos.map((ext, i) => <ExtratoDocument key={i} extrato={ext} />)
+          visibleExtratos.map((ext, i) => (
+            <ExtratoDocument key={`${previewStartIndex}-${i}`} extrato={ext} />
+          ))
         )}
       </div>
     </>
