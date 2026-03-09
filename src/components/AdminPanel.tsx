@@ -7,12 +7,15 @@ import {
   doc,
   setDoc,
   updateDoc,
-  deleteDoc,
   serverTimestamp,
 } from "firebase/firestore";
-import { createUserWithEmailAndPassword, signOut as firebaseSignOut } from "firebase/auth";
-import { db, secondaryAuth } from "@/lib/firebase";
-import { UserRole } from "@/contexts/AuthContext";
+import {
+  createUserWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  sendPasswordResetEmail,
+} from "firebase/auth";
+import { auth, db, secondaryAuth } from "@/lib/firebase";
+import { UserRole, useAuth } from "@/contexts/AuthContext";
 
 interface UserRecord {
   uid: string;
@@ -27,13 +30,19 @@ const ROLE_LABELS: Record<UserRole, string> = {
   usuario: "Usuário",
 };
 
-export default function AdminPanel() {
+interface AdminPanelProps {
+  onBackToExtrato?: () => void;
+}
+
+export default function AdminPanel({ onBackToExtrato }: AdminPanelProps) {
+  const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
 
   // Formulário de criação
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [newRole, setNewRole] = useState<UserRole>("usuario");
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState("");
@@ -41,6 +50,10 @@ export default function AdminPanel() {
 
   // Confirmação de exclusão
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [deletingUid, setDeletingUid] = useState<string | null>(null);
+  const [resettingUid, setResettingUid] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
+  const [actionSuccess, setActionSuccess] = useState("");
 
   const fetchUsers = useCallback(async () => {
     setLoadingUsers(true);
@@ -88,9 +101,22 @@ export default function AdminPanel() {
         createdAt: serverTimestamp(),
       });
 
-      setFormSuccess(`Usuário "${newEmail}" criado com sucesso!`);
+      let resetNotice = "";
+      try {
+        auth.languageCode = "pt-BR";
+        await sendPasswordResetEmail(auth, newEmail, {
+          url: `${window.location.origin}/login`,
+          handleCodeInApp: false,
+        });
+        resetNotice = " Link de redefinicao enviado por email.";
+      } catch {
+        resetNotice = " Usuario criado, mas nao foi possivel enviar o email de redefinicao agora.";
+      }
+
+      setFormSuccess(`Usuário "${newEmail}" criado com sucesso!${resetNotice}`);
       setNewEmail("");
       setNewPassword("");
+      setShowNewPassword(false);
       setNewRole("usuario");
       await fetchUsers();
     } catch (err: unknown) {
@@ -117,20 +143,90 @@ export default function AdminPanel() {
   };
 
   const handleDelete = async (uid: string) => {
-    await deleteDoc(doc(db, "users", uid));
-    setUsers((prev) => prev.filter((u) => u.uid !== uid));
-    setConfirmDelete(null);
+    if (uid === currentUser?.uid) {
+      setActionError("Nao e permitido excluir a propria conta pelo painel.");
+      setConfirmDelete(null);
+      return;
+    }
+    setActionError("");
+    setActionSuccess("");
+    setDeletingUid(uid);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        throw new Error("Sessao expirada. Faca login novamente.");
+      }
+
+      const response = await fetch("/api/admin/delete-user", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ uid }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.error || "Erro ao excluir usuario.");
+      }
+
+      setUsers((prev) => prev.filter((u) => u.uid !== uid));
+      setActionSuccess("Usuario removido com sucesso.");
+    } catch (err) {
+      setActionError((err as Error).message || "Erro ao excluir usuario.");
+    } finally {
+      setDeletingUid(null);
+      setConfirmDelete(null);
+    }
+  };
+
+  const handleResetPassword = async (user: UserRecord) => {
+    setActionError("");
+    setActionSuccess("");
+    setResettingUid(user.uid);
+    try {
+      auth.languageCode = "pt-BR";
+      await sendPasswordResetEmail(auth, user.email, {
+        url: `${window.location.origin}/login`,
+        handleCodeInApp: false,
+      });
+      setActionSuccess(`Link de redefinicao enviado para "${user.email}".`);
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code;
+      if (code === "auth/invalid-email") {
+        setActionError(`Email invalido para o usuario "${user.email}".`);
+      } else if (code === "auth/user-not-found") {
+        setActionError(`Usuario "${user.email}" nao encontrado no Auth.`);
+      } else if (code === "auth/too-many-requests") {
+        setActionError("Muitas tentativas. Aguarde alguns minutos e tente novamente.");
+      } else {
+        setActionError("Erro ao enviar redefinicao de senha. Tente novamente.");
+      }
+    } finally {
+      setResettingUid(null);
+    }
   };
 
   return (
     <div className="max-w-5xl mx-auto mb-8">
       {/* Header do painel */}
       <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-        <div className="bg-gradient-to-r from-gray-800 via-gray-700 to-gray-600 px-8 py-5 flex items-center gap-3">
-          <svg className="w-6 h-6 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
-          </svg>
-          <h2 className="text-xl font-bold text-white">Painel do Administrador</h2>
+        <div className="bg-gradient-to-r from-gray-800 via-gray-700 to-gray-600 px-8 py-5 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <svg className="w-6 h-6 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
+            </svg>
+            <h2 className="text-xl font-bold text-white">Painel do Administrador</h2>
+          </div>
+          {onBackToExtrato && (
+            <button
+              onClick={onBackToExtrato}
+              className="bg-white/10 hover:bg-white/20 text-white text-sm font-semibold py-2 px-4 rounded-lg transition-all border border-white/20 hover:border-white/30"
+            >
+              Voltar para Extratos
+            </button>
+          )}
         </div>
 
         <div className="p-8 space-y-8">
@@ -157,14 +253,23 @@ export default function AdminPanel() {
 
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">Senha</label>
-                <input
-                  type="password"
-                  required
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Mínimo 6 caracteres"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                />
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    required
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Minimo 6 caracteres"
+                    className="w-full px-3 py-2 pr-16 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((value) => !value)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-semibold text-green-700 hover:text-green-800 px-2 py-1 rounded"
+                  >
+                    {showNewPassword ? "Ocultar" : "Ver"}
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -210,6 +315,17 @@ export default function AdminPanel() {
               Usuários Cadastrados
             </h3>
 
+            {actionError && (
+              <div className="mb-3 bg-red-50 border-l-4 border-red-400 p-3 rounded text-sm text-red-700">
+                {actionError}
+              </div>
+            )}
+            {actionSuccess && (
+              <div className="mb-3 bg-green-50 border-l-4 border-green-400 p-3 rounded text-sm text-green-700">
+                {actionSuccess}
+              </div>
+            )}
+
             {loadingUsers ? (
               <div className="flex items-center justify-center py-8 text-gray-400 text-sm">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600 mr-3"></div>
@@ -253,6 +369,14 @@ export default function AdminPanel() {
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-2">
                             <button
+                              onClick={() => handleResetPassword(u)}
+                              disabled={resettingUid === u.uid}
+                              title="Enviar link de redefinicao de senha"
+                              className="text-xs font-semibold px-3 py-1.5 rounded-md bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {resettingUid === u.uid ? "Enviando..." : "Enviar reset"}
+                            </button>
+                            <button
                               onClick={() => handleToggleActive(u)}
                               title={u.active ? "Desativar" : "Ativar"}
                               className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-all ${
@@ -264,14 +388,19 @@ export default function AdminPanel() {
                               {u.active ? "Desativar" : "Ativar"}
                             </button>
 
-                            {confirmDelete === u.uid ? (
+                            {u.uid === currentUser?.uid ? (
+                              <span className="text-xs font-semibold px-3 py-1.5 rounded-md bg-gray-100 text-gray-500">
+                                Conta atual
+                              </span>
+                            ) : confirmDelete === u.uid ? (
                               <div className="flex items-center gap-1">
                                 <span className="text-xs text-gray-500">Confirmar?</span>
                                 <button
                                   onClick={() => handleDelete(u.uid)}
+                                  disabled={deletingUid === u.uid}
                                   className="text-xs font-semibold px-3 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition-all"
                                 >
-                                  Sim
+                                  {deletingUid === u.uid ? "Excluindo..." : "Sim"}
                                 </button>
                                 <button
                                   onClick={() => setConfirmDelete(null)}
@@ -283,8 +412,9 @@ export default function AdminPanel() {
                             ) : (
                               <button
                                 onClick={() => setConfirmDelete(u.uid)}
+                                disabled={deletingUid !== null}
                                 title="Excluir usuário"
-                                className="text-xs font-semibold px-3 py-1.5 rounded-md bg-red-100 text-red-700 hover:bg-red-200 transition-all"
+                                className="text-xs font-semibold px-3 py-1.5 rounded-md bg-red-100 text-red-700 hover:bg-red-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 Excluir
                               </button>
@@ -303,3 +433,4 @@ export default function AdminPanel() {
     </div>
   );
 }
+
